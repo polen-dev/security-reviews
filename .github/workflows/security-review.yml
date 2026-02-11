@@ -59,7 +59,6 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           use_vertex: "true"
-          show_full_output: "true"
           github_token: ${{ github.token }}
           prompt: |
             You are a security reviewer for polen-dev.
@@ -75,15 +74,24 @@ jobs:
 
             ${{ inputs.extra_instructions }}
 
-            ## Output
-            1. Post inline comments on vulnerable lines
-            2. Post a summary comment with findings by severity
-            3. Return structured JSON matching .security-config/schemas/findings.json
+            ## Output Format
+            Respond with a markdown security review report. Structure it as:
+
+            1. A summary header with total findings count by severity
+            2. Each finding with: severity emoji, title, file:line, description, and fix recommendation
+            3. At the end, output a JSON code block with structured findings matching .security-config/schemas/findings.json
+
+            Use these severity emojis:
+            - CRITICAL: 🚨
+            - HIGH: ⚠️
+            - MEDIUM: 📋
+            - LOW: ℹ️
+            - INFO: 💡
 
             ## Important
             - Be precise. Flag real issues, not theoretical ones.
             - Every finding needs file, line, and fix recommendation.
-            - If the PR is clean, report zero findings. Do not invent issues.
+            - If the PR is clean, say so clearly. Do not invent issues.
           claude_args: >-
             --model ${{ inputs.model }}
             --max-turns ${{ inputs.max_turns }}
@@ -92,23 +100,36 @@ jobs:
           ANTHROPIC_VERTEX_PROJECT_ID: polen-agents
           CLOUD_ML_REGION: us-east5
 
-      - name: Check for critical findings
+      - name: Post review comment
         if: always() && steps.review.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
+          REVIEW_OUTPUT: ${{ steps.review.outputs.result }}
         run: |
-          # Check PR comments posted by the review for CRITICAL findings
-          # This is the fallback mechanism — parse comments for severity markers
-          COMMENTS=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments \
-            --jq '[.[] | select(.body | test("CRITICAL"; "i"))] | length')
+          # Post Claude's review as a PR comment
+          if [ -z "$REVIEW_OUTPUT" ]; then
+            echo "No review output to post."
+            exit 0
+          fi
 
-          REVIEW_COMMENTS=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews \
-            --jq '[.[] | select(.body | test("CRITICAL"; "i"))] | length')
+          # Post the review as a comment
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --repo ${{ github.repository }} \
+            --body "## 🔒 Security Review
 
-          TOTAL=$((COMMENTS + REVIEW_COMMENTS))
+          $REVIEW_OUTPUT
 
-          if [ "$TOTAL" -gt 0 ]; then
-            echo "::error::Security review found CRITICAL findings. See PR comments for details."
+          ---
+          *Automated security review by Claude on Vertex AI*"
+
+      - name: Check for critical findings
+        if: always() && steps.review.outcome == 'success'
+        env:
+          REVIEW_OUTPUT: ${{ steps.review.outputs.result }}
+        run: |
+          # Check Claude's output for CRITICAL findings
+          if echo "$REVIEW_OUTPUT" | grep -qi "CRITICAL"; then
+            echo "::error::Security review found CRITICAL findings. See PR comment for details."
             exit 1
           fi
 
