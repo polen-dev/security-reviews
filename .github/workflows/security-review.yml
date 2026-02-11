@@ -6,7 +6,7 @@ on:
       model:
         description: "Claude model to use for the review"
         type: string
-        default: "claude-sonnet-4-5-20250929"
+        default: "claude-sonnet-4-5"
       max_turns:
         description: "Maximum agentic turns for the review"
         type: number
