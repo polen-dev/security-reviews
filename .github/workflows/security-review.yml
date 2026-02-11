@@ -59,10 +59,6 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           use_vertex: "true"
-          model: ${{ inputs.model }}
-          max_turns: ${{ inputs.max_turns }}
-          allowed_tools: "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
-          claude_md_path: ".security-config/CLAUDE.md"
           prompt: |
             You are a security reviewer for polen-dev.
 
@@ -86,6 +82,10 @@ jobs:
             - Be precise. Flag real issues, not theoretical ones.
             - Every finding needs file, line, and fix recommendation.
             - If the PR is clean, report zero findings. Do not invent issues.
+          claude_args: >-
+            --model ${{ inputs.model }}
+            --max-turns ${{ inputs.max_turns }}
+            --allowedTools "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
         env:
           ANTHROPIC_VERTEX_PROJECT_ID: polen-agents
           CLOUD_ML_REGION: us-east5
