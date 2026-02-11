@@ -1,0 +1,14 @@
+# Copy this file to .github/workflows/security-review.yml in your repository.
+# Make sure WIF_PROVIDER and WIF_SERVICE_ACCOUNT secrets are configured
+# in your repository or organization settings.
+
+name: Security Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  security-review:
+    uses: polen-dev/security-reviews/.github/workflows/security-review.yml@v1
+    secrets: inherit

@@ -1,0 +1,113 @@
+name: Security Review (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: "Claude model to use for the review"
+        type: string
+        default: "claude-sonnet-4-5-20250929"
+      max_turns:
+        description: "Maximum agentic turns for the review"
+        type: number
+        default: 10
+      extra_instructions:
+        description: "Additional instructions appended to the review prompt"
+        type: string
+        default: ""
+    secrets:
+      WIF_PROVIDER:
+        required: true
+      WIF_SERVICE_ACCOUNT:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  security-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout calling repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout security review rules
+        uses: actions/checkout@v4
+        with:
+          repository: polen-dev/security-reviews
+          path: .security-config
+          sparse-checkout: |
+            rules/
+            schemas/
+            CLAUDE.md
+          sparse-checkout-cone-mode: false
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Run security review
+        id: review
+        uses: anthropics/claude-code-action@v1
+        with:
+          use_vertex: "true"
+          model: ${{ inputs.model }}
+          max_turns: ${{ inputs.max_turns }}
+          allowed_tools: "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+          claude_md_path: ".security-config/CLAUDE.md"
+          prompt: |
+            You are a security reviewer for polen-dev.
+
+            ## Task
+            Review this PR for security vulnerabilities. Focus ONLY on the diff.
+
+            ## Rules
+            Read and apply ALL of these:
+            - .security-config/rules/security-rules.md
+            - .security-config/rules/false-positives.md
+            - .security-config/rules/polen-specific.md
+
+            ${{ inputs.extra_instructions }}
+
+            ## Output
+            1. Post inline comments on vulnerable lines
+            2. Post a summary comment with findings by severity
+            3. Return structured JSON matching .security-config/schemas/findings.json
+
+            ## Important
+            - Be precise. Flag real issues, not theoretical ones.
+            - Every finding needs file, line, and fix recommendation.
+            - If the PR is clean, report zero findings. Do not invent issues.
+        env:
+          ANTHROPIC_VERTEX_PROJECT_ID: polen-agents
+          CLOUD_ML_REGION: us-east5
+
+      - name: Check for critical findings
+        if: always() && steps.review.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Check PR comments posted by the review for CRITICAL findings
+          # This is the fallback mechanism — parse comments for severity markers
+          COMMENTS=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments \
+            --jq '[.[] | select(.body | test("CRITICAL"; "i"))] | length')
+
+          REVIEW_COMMENTS=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews \
+            --jq '[.[] | select(.body | test("CRITICAL"; "i"))] | length')
+
+          TOTAL=$((COMMENTS + REVIEW_COMMENTS))
+
+          if [ "$TOTAL" -gt 0 ]; then
+            echo "::error::Security review found CRITICAL findings. See PR comments for details."
+            exit 1
+          fi
+
+          echo "No CRITICAL findings detected."

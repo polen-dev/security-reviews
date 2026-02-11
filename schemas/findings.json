@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/polen-dev/security-reviews/schemas/findings.json",
+  "title": "Security Review Findings",
+  "description": "Structured output schema for automated security reviews performed by Claude on pull requests.",
+  "type": "object",
+  "required": ["has_critical", "summary", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "has_critical": {
+      "type": "boolean",
+      "description": "True if any finding has CRITICAL severity. Used by CI to block merges."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Human-readable summary of the review. Should mention total finding count and highest severity."
+    },
+    "findings": {
+      "type": "array",
+      "description": "List of security findings. Empty array if the PR is clean.",
+      "items": {
+        "type": "object",
+        "required": ["severity", "category", "title", "file", "recommendation"],
+        "additionalProperties": false,
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"],
+            "description": "CRITICAL: exploitable vulnerability requiring immediate fix. HIGH: serious issue, should block merge. MEDIUM: notable concern, fix recommended. LOW: minor issue or hardening suggestion. INFO: observation, no action required."
+          },
+          "category": {
+            "type": "string",
+            "description": "Security category (e.g., 'Injection', 'Broken Access Control', 'Cryptographic Failures', 'Multi-Tenant Isolation', 'LGPD/Data Protection')."
+          },
+          "title": {
+            "type": "string",
+            "description": "Short, descriptive title of the finding (e.g., 'SQL injection via unsanitized user input')."
+          },
+          "file": {
+            "type": "string",
+            "description": "Relative path to the file containing the vulnerability."
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Line number where the vulnerability occurs. Omit only if the finding is file-wide."
+          },
+          "recommendation": {
+            "type": "string",
+            "description": "Actionable fix recommendation. Be specific: show what to change, not just what is wrong."
+          },
+          "cwe": {
+            "type": "string",
+            "pattern": "^CWE-[0-9]+$",
+            "description": "CWE identifier when applicable (e.g., 'CWE-89' for SQL injection). Omit if no standard CWE maps to the finding."
+          }
+        }
+      }
+    }
+  }
+}
