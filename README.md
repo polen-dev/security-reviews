@@ -29,7 +29,18 @@ Claude on Vertex AI      (reviews diff against rules/)
 
 ## Adding to Your Repo
 
-1. Create `.github/workflows/security-review.yml` in your repo:
+### Quick setup (< 2 minutes)
+
+**Step 1** — Copy the caller workflow into your repo:
+
+```bash
+# From the root of your repo
+mkdir -p .github/workflows
+curl -sL https://raw.githubusercontent.com/polen-dev/security-reviews/v1/caller-template.yml \
+  > .github/workflows/security-review.yml
+```
+
+Or create `.github/workflows/security-review.yml` manually:
 
 ```yaml
 name: Security Review
@@ -44,13 +55,38 @@ jobs:
     secrets: inherit
 ```
 
+**Step 2** — Commit and push to your default branch (`main`):
+
+```bash
+git add .github/workflows/security-review.yml
+git commit -m "Add automated security review"
+git push origin main
+```
+
+**Step 3** — Open a PR to verify it works. The "Security Review" check should appear within a few seconds and post findings as a PR comment when it finishes (~1-2 minutes).
+
 That's it. The reusable workflow handles checkout, authentication, rules, and reporting.
 
-2. Make sure your repo has access to the required organization secrets:
-   - `WIF_PROVIDER` - Workload Identity Federation provider resource name
-   - `WIF_SERVICE_ACCOUNT` - Service account email for Vertex AI access
+### Prerequisites
 
-These should already be configured as organization-level secrets. If not, ask in #eng-infra.
+The workflow uses two organization secrets that are already configured for all `polen-dev` repos:
+
+| Secret | Purpose |
+|--------|---------|
+| `WIF_PROVIDER` | Workload Identity Federation provider for keyless GCP auth |
+| `WIF_SERVICE_ACCOUNT` | Service account with Vertex AI access |
+
+These are inherited via `secrets: inherit`. If your repo doesn't have access, ask in **#eng-infra**.
+
+### Verifying it works
+
+After pushing the workflow to `main`, open any PR and check:
+
+1. The **Security Review** check appears under "Checks" on the PR
+2. After 1-2 minutes, a comment appears with findings (or a clean report)
+3. If CRITICALs are found, the check shows as failed
+
+If the check doesn't appear, see [Troubleshooting](#troubleshooting) below.
 
 ## Configuration
 
@@ -62,7 +98,7 @@ jobs:
     uses: polen-dev/security-reviews/.github/workflows/security-review.yml@v1
     secrets: inherit
     with:
-      model: claude-sonnet-4-5-20250929   # default; can use opus for critical repos
+      model: claude-sonnet-4-5   # default; can use opus for critical repos
       max_turns: 10                        # max agent turns; increase for large PRs
       extra_instructions: |                # repo-specific rules appended to the prompt
         This repo handles payment processing.
@@ -71,7 +107,7 @@ jobs:
 
 | Input                | Default                          | Description                                      |
 |----------------------|----------------------------------|--------------------------------------------------|
-| `model`              | `claude-sonnet-4-5-20250929`     | Claude model ID for the review                   |
+| `model`              | `claude-sonnet-4-5`     | Claude model ID for the review                   |
 | `max_turns`          | `10`                             | Maximum agent turns before timeout               |
 | `extra_instructions` | `""`                             | Additional repo-specific security rules          |
 
@@ -123,7 +159,7 @@ The `has_critical` boolean at the top level is what CI uses to pass/fail the che
 
 ## Cost
 
-Each review costs approximately **$0.05 USD** with the default Sonnet model. Cost scales with PR size since larger diffs require more tokens. For most PRs (under 500 lines changed), expect costs under $0.10.
+Each review costs approximately **$0.30–0.50 USD** with the default Sonnet model. Cost scales with PR size since larger diffs require more tokens and the agent reads the security rules on each run. For most PRs (under 500 lines changed), expect costs under $0.50.
 
 Using Opus increases cost roughly 5x but may catch more subtle issues. Consider it for repos that handle authentication, payments, or sensitive data.
 
