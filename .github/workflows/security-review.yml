@@ -107,4 +107,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-        run: bash .security-config/scripts/post-review.sh
+        run: |
+          echo "Checking .security-config contents:"
+          ls -la .security-config/ || echo "No .security-config dir"
+          ls -la .security-config/scripts/ || echo "No scripts dir"
+          echo "Checking output file:"
+          ls -la "${RUNNER_TEMP}"/claude-* || echo "No claude output files"
+          echo "---"
+          bash .security-config/scripts/post-review.sh
