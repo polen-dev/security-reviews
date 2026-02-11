@@ -45,6 +45,7 @@ jobs:
           sparse-checkout: |
             rules/
             schemas/
+            scripts/
             CLAUDE.md
           sparse-checkout-cone-mode: false
 
@@ -106,45 +107,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-        run: |
-          OUTPUT_FILE="${RUNNER_TEMP}/claude-execution-output.json"
-
-          if [ ! -f "$OUTPUT_FILE" ]; then
-            echo "No execution output file found at $OUTPUT_FILE"
-            echo "Listing RUNNER_TEMP contents:"
-            ls -la "$RUNNER_TEMP"/ || true
-            exit 0
-          fi
-
-          # Extract Claude's final result text
-          TMPFILE=$(mktemp)
-          jq -r '.result // empty' "$OUTPUT_FILE" > "$TMPFILE" 2>/dev/null
-
-          if [ ! -s "$TMPFILE" ]; then
-            echo "No result in execution output."
-            rm -f "$TMPFILE"
-            exit 0
-          fi
-
-          # Prepend header and append footer
-          COMMENT_FILE=$(mktemp)
-          echo "## 🔒 Security Review" > "$COMMENT_FILE"
-          echo "" >> "$COMMENT_FILE"
-          cat "$TMPFILE" >> "$COMMENT_FILE"
-          echo "" >> "$COMMENT_FILE"
-          echo "---" >> "$COMMENT_FILE"
-          echo "*Automated security review by Claude on Vertex AI*" >> "$COMMENT_FILE"
-
-          # Post as PR comment
-          gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "$COMMENT_FILE"
-          echo "Review comment posted."
-
-          # Check for CRITICAL findings
-          if grep -qi "CRITICAL" "$TMPFILE"; then
-            echo "::error::Security review found CRITICAL findings. See PR comment for details."
-            rm -f "$TMPFILE" "$COMMENT_FILE"
-            exit 1
-          fi
-
-          rm -f "$TMPFILE" "$COMMENT_FILE"
-          echo "No CRITICAL findings detected."
+        run: bash .security-config/scripts/post-review.sh
