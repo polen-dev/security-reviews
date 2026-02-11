@@ -45,7 +45,6 @@ jobs:
           sparse-checkout: |
             rules/
             schemas/
-            scripts/
             CLAUDE.md
           sparse-checkout-cone-mode: false
 
@@ -103,15 +102,43 @@ jobs:
 
       - name: Post review and check findings
         if: always() && steps.review.outcome == 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-        run: |
-          echo "Checking .security-config contents:"
-          ls -la .security-config/ || echo "No .security-config dir"
-          ls -la .security-config/scripts/ || echo "No scripts dir"
-          echo "Checking output file:"
-          ls -la "${RUNNER_TEMP}"/claude-* || echo "No claude output files"
-          echo "---"
-          bash .security-config/scripts/post-review.sh
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // Find the Claude execution output
+            const outputFile = path.join(process.env.RUNNER_TEMP, 'claude-execution-output.json');
+
+            if (!fs.existsSync(outputFile)) {
+              console.log('No execution output file found.');
+              return;
+            }
+
+            const output = JSON.parse(fs.readFileSync(outputFile, 'utf8'));
+            const result = output.result;
+
+            if (!result) {
+              console.log('No result in execution output.');
+              return;
+            }
+
+            // Post review as PR comment
+            const body = `## 🔒 Security Review\n\n${result}\n\n---\n*Automated security review by Claude on Vertex AI*`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+            console.log('Review comment posted.');
+
+            // Check for CRITICAL findings
+            if (result.toUpperCase().includes('CRITICAL')) {
+              core.setFailed('Security review found CRITICAL findings. See PR comment for details.');
+            } else {
+              console.log('No CRITICAL findings detected.');
+            }
