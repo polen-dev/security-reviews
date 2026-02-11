@@ -100,35 +100,47 @@ jobs:
           ANTHROPIC_VERTEX_PROJECT_ID: polen-agents
           CLOUD_ML_REGION: us-east5
 
-      - name: Post review comment
+      - name: Post review and check findings
         if: always() && steps.review.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
-          REVIEW_OUTPUT: ${{ steps.review.outputs.result }}
         run: |
-          # Post Claude's review as a PR comment
-          if [ -z "$REVIEW_OUTPUT" ]; then
-            echo "No review output to post."
+          OUTPUT_FILE="${RUNNER_TEMP}/claude-execution-output.json"
+
+          if [ ! -f "$OUTPUT_FILE" ]; then
+            echo "No execution output file found."
             exit 0
           fi
 
-          # Post the review as a comment
+          # Extract Claude's final result text from the execution output
+          RESULT=$(jq -r '.result // empty' "$OUTPUT_FILE" 2>/dev/null)
+
+          if [ -z "$RESULT" ]; then
+            echo "No result in execution output."
+            exit 0
+          fi
+
+          # Use a temp file to avoid shell escaping issues with the review content
+          TMPFILE=$(mktemp)
+          {
+            echo "## 🔒 Security Review"
+            echo ""
+            echo "$RESULT"
+            echo ""
+            echo "---"
+            echo "*Automated security review by Claude on Vertex AI*"
+          } > "$TMPFILE"
+
           gh pr comment ${{ github.event.pull_request.number }} \
             --repo ${{ github.repository }} \
-            --body "## 🔒 Security Review
+            --body-file "$TMPFILE"
 
-          $REVIEW_OUTPUT
+          rm -f "$TMPFILE"
 
-          ---
-          *Automated security review by Claude on Vertex AI*"
+          echo "Review comment posted."
 
-      - name: Check for critical findings
-        if: always() && steps.review.outcome == 'success'
-        env:
-          REVIEW_OUTPUT: ${{ steps.review.outputs.result }}
-        run: |
-          # Check Claude's output for CRITICAL findings
-          if echo "$REVIEW_OUTPUT" | grep -qi "CRITICAL"; then
+          # Check for CRITICAL findings
+          if echo "$RESULT" | grep -qi "CRITICAL"; then
             echo "::error::Security review found CRITICAL findings. See PR comment for details."
             exit 1
           fi
