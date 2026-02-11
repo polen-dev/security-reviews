@@ -59,6 +59,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           use_vertex: "true"
+          show_full_output: "true"
           prompt: |
             You are a security reviewer for polen-dev.
 
