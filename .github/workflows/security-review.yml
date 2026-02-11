@@ -116,13 +116,16 @@ jobs:
               return;
             }
 
-            const output = JSON.parse(fs.readFileSync(outputFile, 'utf8'));
-            const result = output.result;
+            const messages = JSON.parse(fs.readFileSync(outputFile, 'utf8'));
+            const resultMsg = messages.find(m => m.type === 'result');
 
-            if (!result) {
-              console.log('No result in execution output.');
+            if (!resultMsg || !resultMsg.result) {
+              console.log('No result message found in execution output.');
+              console.log('Message types:', messages.map(m => m.type));
               return;
             }
+
+            const result = resultMsg.result;
 
             // Post review as PR comment
             const body = `## 🔒 Security Review\n\n${result}\n\n---\n*Automated security review by Claude on Vertex AI*`;
