@@ -60,6 +60,7 @@ jobs:
         with:
           use_vertex: "true"
           show_full_output: "true"
+          github_token: ${{ github.token }}
           prompt: |
             You are a security reviewer for polen-dev.
 
