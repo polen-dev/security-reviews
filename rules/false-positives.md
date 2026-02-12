@@ -173,3 +173,107 @@ CREATE INDEX idx_users_email ON users(email);
 - Raw SQL that constructs queries from variables
 - Permission grants (GRANT, REVOKE) that change access control
 - Operations that disable security features (disable RLS, drop constraints)
+
+---
+
+## 12. Denial of Service and Resource Exhaustion
+
+**Skip**: DoS, rate limiting gaps, and resource exhaustion issues are out of scope for code-level security reviews.
+
+- Missing rate limiting on endpoints
+- Unbounded loops or large payload handling
+- Memory or CPU exhaustion scenarios
+- Regular expression denial of service (ReDoS) unless the regex is trivially exploitable
+
+**Why**: DoS mitigation is an infrastructure concern (WAF, load balancer, API gateway) and not typically exploitable via a single PR change.
+
+---
+
+## 13. Lack of Hardening Measures
+
+**Skip**: Missing best practices without a concrete, exploitable vulnerability are not findings.
+
+- Missing security headers (CSP, HSTS, X-Frame-Options) unless their absence enables a specific exploit in the diff
+- Missing input length limits without a concrete exploit path
+- Not using the "most secure" option when the current option is still safe
+- Suggestions to add logging, monitoring, or alerting
+
+**Why**: Hardening suggestions are valuable but belong in architecture reviews, not PR-level security reviews.
+
+---
+
+## 14. Theoretical Race Conditions
+
+**Skip**: Race conditions that are only theoretically exploitable without a concrete, practical attack path.
+
+- Time-of-check to time-of-use (TOCTOU) in single-threaded contexts
+- Race conditions that require implausible timing or access
+- Concurrent access issues in code that runs in a single process
+
+**Flag when**: The race condition has a concrete exploitation path -- e.g., a double-spend in a payment flow, or a privilege escalation via concurrent requests to a stateful endpoint.
+
+---
+
+## 15. SSRF (Path-Only)
+
+**Skip**: Server-side request forgery findings where the attacker only controls the URL path, not the host or protocol.
+
+```typescript
+// NOT a finding -- attacker cannot change the host:
+const response = await fetch(`https://api.internal.com/${userInput}`);
+```
+
+**Flag when**: The attacker controls the full URL, the host, or the protocol:
+```typescript
+// THIS is a finding -- attacker controls the full URL:
+const response = await fetch(userProvidedUrl);
+```
+
+---
+
+## 16. AI Prompt Content
+
+**Skip**: User-controlled content being included in AI/LLM prompts is not a security vulnerability.
+
+- User input passed to system prompts, chat completions, or embeddings
+- Prompt injection concerns in AI-powered features
+
+**Why**: Prompt injection is an AI safety concern, not a traditional security vulnerability. It does not lead to RCE, data breach, or privilege escalation in the application itself.
+
+**Exception**: Flag if AI output is used in dangerous sinks without sanitization (e.g., AI-generated SQL executed directly, AI output rendered as raw HTML).
+
+---
+
+## 17. Client-Side Auth Checks
+
+**Skip**: Client-side JavaScript code (React components, Vue components, etc.) that does not implement authentication or permission checks is not a vulnerability.
+
+- Missing auth guards in frontend route definitions
+- UI components that render without checking permissions
+- Client-side form validation that does not verify auth state
+
+**Why**: Authentication and authorization must be enforced server-side. Client-side checks are UX conveniences, not security controls. The server API is the trust boundary.
+
+**Flag when**: The client-side code IS the only auth check (e.g., a serverless function or API route that relies on a client-sent "isAdmin" flag).
+
+---
+
+## Precedents
+
+These precedents clarify recurring judgment calls. Apply them consistently across reviews.
+
+1. **Logging URLs is safe; logging high-value secrets is a vulnerability.** URLs, request paths, and query parameters are safe to log. API keys, passwords, tokens, and PII in logs are findings.
+
+2. **UUIDs are unguessable and do not need validation.** UUIDv4 values used as identifiers are cryptographically random. Do not flag "predictable ID" or "IDOR" for UUID-based lookups unless there is a concrete path to enumerate them.
+
+3. **Environment variables and CLI flags are trusted values.** Values read from `process.env`, CLI arguments, or config files are not user-controlled input. Do not flag injection risks for these.
+
+4. **React and Angular are generally secure against XSS.** These frameworks escape output by default. Only flag XSS when unsafe HTML injection methods are used with user input (e.g., innerHTML, bypassSecurityTrustHtml).
+
+5. **GitHub Actions workflow vulnerabilities need a concrete attack path.** Flag only when untrusted input (e.g., PR title, branch name, issue body) flows into a dangerous context (run: step, actions/github-script) without sanitization.
+
+6. **Notebook (.ipynb) vulnerabilities need a concrete attack path.** Notebooks are developer tools. Only flag if untrusted input enters a notebook's execution path in a production or CI context.
+
+7. **Command injection in shell scripts needs a concrete untrusted input path.** Scripts that only process trusted inputs (hardcoded values, env vars, CI variables) are not vulnerable. Flag only when external, attacker-controlled input reaches a shell command.
+
+8. **Logging non-PII data is not a vulnerability.** Logging request metadata, error codes, timestamps, feature flags, and internal identifiers is standard practice and not a finding.
