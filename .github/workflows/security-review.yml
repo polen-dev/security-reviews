@@ -68,9 +68,19 @@ jobs:
 
             ## Rules
             Read and apply ALL of these:
+            - .security-config/rules/methodology.md
             - .security-config/rules/security-rules.md
             - .security-config/rules/false-positives.md
             - .security-config/rules/polen-specific.md
+
+            ## Methodology
+            Follow the 3-phase approach defined in methodology.md:
+            1. Repository Context Research -- understand existing security patterns before reviewing
+            2. Comparative Analysis -- compare PR changes against established patterns
+            3. Vulnerability Assessment -- trace data flow and identify concrete vulnerabilities
+
+            Use the confidence scoring system. Only report findings with confidence >= 0.8 (8/10).
+            Include the confidence score in each finding.
 
             ${{ inputs.extra_instructions }}
 
@@ -78,7 +88,7 @@ jobs:
             Respond with a markdown security review report. Structure it as:
 
             1. A summary header with total findings count by severity
-            2. Each finding with: severity emoji, title, file:line, description, and fix recommendation
+            2. Each finding with: severity emoji, title, file:line, confidence score, description, and fix recommendation
             3. At the end, output a JSON code block with structured findings matching .security-config/schemas/findings.json
 
             Use these severity emojis:
@@ -90,7 +100,7 @@ jobs:
 
             ## Important
             - Be precise. Flag real issues, not theoretical ones.
-            - Every finding needs file, line, and fix recommendation.
+            - Every finding needs file, line, confidence score, and fix recommendation.
             - If the PR is clean, say so clearly. Do not invent issues.
           claude_args: >-
             --model ${{ inputs.model }}
