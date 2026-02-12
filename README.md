@@ -17,13 +17,19 @@ Reusable workflow        (this repo - polen-dev/security-reviews)
 Checkout PR + rules
        |
        v
+Conflict detection       (test merge against base branch)
+       |
+       v
+Lint / Build / TypeCheck (optional - repo configures commands)
+       |
+       v
 Authenticate via WIF     (Workload Identity Federation - no keys)
        |
        v
 Claude on Vertex AI      (reviews diff against rules/)
        |
-       +---> Inline comments on vulnerable lines
-       +---> Summary comment grouped by severity
+       +---> PR review (APPROVE / REQUEST_CHANGES / COMMENT)
+       +---> Structured report with checklists
        +---> CI status: FAIL if CRITICAL findings exist
 ```
 
@@ -110,6 +116,10 @@ jobs:
 | `model`              | `claude-sonnet-4-5`     | Claude model ID for the review                   |
 | `max_turns`          | `10`                             | Maximum agent turns before timeout               |
 | `extra_instructions` | `""`                             | Additional repo-specific security rules          |
+| `run_lint`           | `""`                             | Lint command (e.g., `yarn lint`). Empty = skip    |
+| `run_build`          | `""`                             | Build command (e.g., `yarn build`). Empty = skip  |
+| `run_typecheck`      | `""`                             | Type-check command (e.g., `yarn tsc --noEmit`). Empty = skip |
+| `node_version`       | `"20"`                           | Node.js version for lint/build/typecheck steps   |
 
 ## Branch Protection
 
@@ -132,6 +142,28 @@ If a PR is blocked by a false positive or an accepted risk:
 
 Only repository admins can apply this label. Use it sparingly and document the reason in the PR description.
 
+## Automated Checks (Lint / Build / TypeCheck)
+
+The workflow can optionally run lint, build, and type-check commands **before** the Claude review. Results are injected into the review report.
+
+```yaml
+jobs:
+  security-review:
+    uses: polen-dev/security-reviews/.github/workflows/security-review.yml@v1
+    secrets: inherit
+    with:
+      run_lint: "yarn lint"
+      run_build: "yarn build"
+      run_typecheck: "yarn tsc --noEmit"
+      node_version: "20"
+```
+
+These steps are **optional** — leave them empty (or omit them) to skip. When configured, results appear in the "Automated Checks" table of the report. Failed checks do not block the CI by themselves but are reported to the reviewer.
+
+## Merge Conflict Detection
+
+The workflow automatically checks if the PR branch has merge conflicts with the base branch. This runs on every PR without any configuration. Results appear in the "Automated Checks" table.
+
 ## Security Rules
 
 Rules live in the `rules/` directory of this repo:
@@ -139,29 +171,41 @@ Rules live in the `rules/` directory of this repo:
 | File                    | Purpose                                                   |
 |-------------------------|-----------------------------------------------------------|
 | `security-rules.md`    | OWASP Top 10+ checklist with vulnerable/fixed code examples |
-| `false-positives.md`   | What to skip (test files, env references, type definitions) |
 | `polen-specific.md`    | Business-context rules (multi-tenant isolation, LGPD, financial data) |
+| `code-quality.md`      | Code quality checks (function length, types, error handling, architecture) |
+| `impact-analysis.md`   | Blast radius assessment (shared files, types, migrations, endpoints) |
+| `methodology.md`       | 3-phase review approach with confidence scoring           |
+| `false-positives.md`   | What to skip (test files, env references, type definitions) |
 
 To propose changes to rules, open a PR against this repo.
 
 ## Findings Schema
 
-Review output follows a JSON schema at `schemas/findings.json`. Each finding includes:
+Review output follows a JSON schema at `schemas/findings.json`. Top-level fields:
+
+- **has_critical**: Boolean used by CI to pass/fail the check
+- **summary**: Human-readable overview
+- **recommendation**: `APPROVE`, `APPROVE_WITH_CAVEATS`, or `REQUEST_CHANGES`
+- **automated_checks**: Results of lint/build/typecheck/conflicts (if configured)
+- **impact_areas**: List of impacted areas (shared-utils, database-schema, etc.)
+
+Each finding includes:
 
 - **severity**: CRITICAL, HIGH, MEDIUM, LOW, or INFO
-- **category**: Security category (e.g., Injection, Broken Access Control)
+- **category**: Security or quality category
 - **title**: Short description of the issue
 - **file** and **line**: Location in the codebase
+- **confidence**: Score (0.7-1.0) for security findings
 - **recommendation**: Actionable fix
 - **cwe**: CWE identifier when applicable
 
-The `has_critical` boolean at the top level is what CI uses to pass/fail the check.
-
 ## Cost
 
-Each review costs approximately **$0.30–0.50 USD** with the default Sonnet model. Cost scales with PR size since larger diffs require more tokens and the agent reads the security rules on each run. For most PRs (under 500 lines changed), expect costs under $0.50.
+Each review costs approximately **$0.35–0.55 USD** with the default Sonnet model. Cost scales with PR size since larger diffs require more tokens and the agent reads all rule files on each run. For most PRs (under 500 lines changed), expect costs under $0.55.
 
 Using Opus increases cost roughly 5x but may catch more subtle issues. Consider it for repos that handle authentication, payments, or sensitive data.
+
+Enabling lint/build/typecheck adds workflow execution time but does not increase Claude API costs.
 
 ## Troubleshooting
 

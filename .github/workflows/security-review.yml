@@ -15,6 +15,22 @@ on:
         description: "Additional instructions appended to the review prompt"
         type: string
         default: ""
+      run_lint:
+        description: "Lint command to run before review (e.g., 'yarn lint'). Leave empty to skip."
+        type: string
+        default: ""
+      run_build:
+        description: "Build command to run before review (e.g., 'yarn build'). Leave empty to skip."
+        type: string
+        default: ""
+      run_typecheck:
+        description: "TypeScript type-check command (e.g., 'yarn tsc --noEmit'). Leave empty to skip."
+        type: string
+        default: ""
+      node_version:
+        description: "Node.js version for lint/build/typecheck steps"
+        type: string
+        default: "20"
     secrets:
       WIF_PROVIDER:
         required: true
@@ -48,6 +64,86 @@ jobs:
             CLAUDE.md
           sparse-checkout-cone-mode: false
 
+      - name: Check for merge conflicts with base branch
+        id: conflicts
+        continue-on-error: true
+        run: |
+          BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          git fetch origin "$BASE_BRANCH" --depth=1
+
+          # Try a test merge
+          git checkout -b _conflict_test "$HEAD_SHA" 2>/dev/null
+          if git merge --no-commit --no-ff "origin/$BASE_BRANCH" 2>/dev/null; then
+            echo "has_conflicts=false" >> "$GITHUB_OUTPUT"
+            echo "conflict_files=" >> "$GITHUB_OUTPUT"
+            git merge --abort 2>/dev/null || true
+          else
+            CONFLICTED=$(git diff --name-only --diff-filter=U 2>/dev/null || echo "unknown")
+            echo "has_conflicts=true" >> "$GITHUB_OUTPUT"
+            echo "conflict_files<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$CONFLICTED" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+            git merge --abort 2>/dev/null || true
+          fi
+
+          # Return to original ref
+          git checkout "$HEAD_SHA" 2>/dev/null || git checkout -
+
+      - name: Setup Node.js
+        if: inputs.run_lint != '' || inputs.run_build != '' || inputs.run_typecheck != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: 'yarn'
+
+      - name: Install dependencies
+        if: inputs.run_lint != '' || inputs.run_build != '' || inputs.run_typecheck != ''
+        run: yarn install --frozen-lockfile
+
+      - name: Run lint
+        id: lint
+        if: inputs.run_lint != ''
+        continue-on-error: true
+        run: |
+          if ${{ inputs.run_lint }} 2>&1 | tail -50 > /tmp/lint-output.txt; then
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+          fi
+          echo "output<<EOF" >> "$GITHUB_OUTPUT"
+          cat /tmp/lint-output.txt >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Run build
+        id: build
+        if: inputs.run_build != ''
+        continue-on-error: true
+        run: |
+          if ${{ inputs.run_build }} 2>&1 | tail -50 > /tmp/build-output.txt; then
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+          fi
+          echo "output<<EOF" >> "$GITHUB_OUTPUT"
+          cat /tmp/build-output.txt >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Run typecheck
+        id: typecheck
+        if: inputs.run_typecheck != ''
+        continue-on-error: true
+        run: |
+          if ${{ inputs.run_typecheck }} 2>&1 | tail -50 > /tmp/typecheck-output.txt; then
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+          fi
+          echo "output<<EOF" >> "$GITHUB_OUTPUT"
+          cat /tmp/typecheck-output.txt >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -64,14 +160,16 @@ jobs:
             You are a security reviewer for polen-dev.
 
             ## Task
-            Review this PR for security vulnerabilities. Focus ONLY on the diff.
+            Review this PR for security vulnerabilities, code quality, and impact. Focus ONLY on the diff.
 
             ## Rules
-            Read and apply ALL of these:
-            - .security-config/rules/methodology.md
-            - .security-config/rules/security-rules.md
-            - .security-config/rules/false-positives.md
-            - .security-config/rules/polen-specific.md
+            Read and apply ALL of these in order:
+            1. .security-config/rules/methodology.md (review approach)
+            2. .security-config/rules/security-rules.md (OWASP-based rules -- PRIMARY)
+            3. .security-config/rules/polen-specific.md (business-domain rules)
+            4. .security-config/rules/code-quality.md (quality checks)
+            5. .security-config/rules/impact-analysis.md (blast radius)
+            6. .security-config/rules/false-positives.md (what to skip -- apply LAST)
 
             ## Methodology
             Follow the 3-phase approach defined in methodology.md:
@@ -79,28 +177,74 @@ jobs:
             2. Comparative Analysis -- compare PR changes against established patterns
             3. Vulnerability Assessment -- trace data flow and identify concrete vulnerabilities
 
-            Use the confidence scoring system. Only report findings with confidence >= 0.8 (8/10).
-            Include the confidence score in each finding.
+            Use the confidence scoring system. Only report security findings with confidence >= 0.8 (8/10).
+            Code quality and impact findings do not require confidence scores.
+            Include the confidence score in each security finding.
+
+            ## Merge Conflict Status
+            ${{ steps.conflicts.outputs.has_conflicts == 'true' && format('⚠️ This PR has merge conflicts with `{0}`. Conflicting files:\n{1}\nInclude this in the Automated Checks section of your report.', github.event.pull_request.base.ref, steps.conflicts.outputs.conflict_files) || format('✅ No merge conflicts detected with `{0}`.', github.event.pull_request.base.ref) }}
+
+            ## Automated Check Results
+            ${{ steps.lint.outputs.result != '' && format('- **Lint**: {0}', steps.lint.outputs.result) || '- **Lint**: skipped' }}
+            ${{ steps.build.outputs.result != '' && format('- **Build**: {0}', steps.build.outputs.result) || '- **Build**: skipped' }}
+            ${{ steps.typecheck.outputs.result != '' && format('- **TypeCheck**: {0}', steps.typecheck.outputs.result) || '- **TypeCheck**: skipped' }}
+            ${{ steps.conflicts.outputs.has_conflicts == 'true' && '- **Conflicts**: detected' || '- **Conflicts**: none' }}
+
+            Include these results in the "Automated Checks" table of your report.
 
             ${{ inputs.extra_instructions }}
 
             ## Output Format
-            Respond with a markdown security review report. Structure it as:
+            Respond with a structured security review report using this format:
 
-            1. A summary header with total findings count by severity
-            2. Each finding with: severity emoji, title, file:line, confidence score, description, and fix recommendation
-            3. At the end, output a JSON code block with structured findings matching .security-config/schemas/findings.json
+            ### Security Checklist
+            | Check | Status | Notes |
+            |-------|--------|-------|
+            | Injection vulnerabilities | ✅/⚠️/❌ | ... |
+            | Access control | ✅/⚠️/❌ | ... |
+            | Cryptographic issues | ✅/⚠️/❌ | ... |
+            | Authentication/Authorization | ✅/⚠️/❌ | ... |
+            | Input validation | ✅/⚠️/❌ | ... |
+            | Dependency risks | ✅/⚠️/❌ | ... |
 
-            Use these severity emojis:
-            - CRITICAL: 🚨
-            - HIGH: ⚠️
-            - MEDIUM: 📋
-            - LOW: ℹ️
-            - INFO: 💡
+            ### Code Quality
+            | Check | Status | Notes |
+            |-------|--------|-------|
+            | Error handling | ✅/⚠️/❌ | ... |
+            | TypeScript types | ✅/⚠️/❌ | ... |
+            | Function complexity | ✅/⚠️/❌ | ... |
+
+            ### Impact Analysis
+            | Area | Detected | Notes |
+            |------|----------|-------|
+            | Shared files | Yes/No | ... |
+            | Type/interface changes | Yes/No | ... |
+            | Database migrations | Yes/No | ... |
+            | New/modified endpoints | Yes/No | ... |
+            | Config changes | Yes/No | ... |
+
+            ### Automated Checks
+            | Check | Result |
+            |-------|--------|
+            | Lint | ✅ Pass / ❌ Fail / ⏭️ Skipped |
+            | Build | ✅ Pass / ❌ Fail / ⏭️ Skipped |
+            | TypeCheck | ✅ Pass / ❌ Fail / ⏭️ Skipped |
+            | Merge conflicts | ✅ None / ❌ Detected |
+
+            ### Findings
+            [Each finding with: severity emoji, title, file:line, confidence score, description, and fix recommendation]
+
+            Severity emojis: 🚨 CRITICAL, ⚠️ HIGH, 📋 MEDIUM, ℹ️ LOW, 💡 INFO
+
+            ### Recommendation
+            **APPROVE** / **APPROVE_WITH_CAVEATS** / **REQUEST_CHANGES**
+
+            At the end, output a JSON code block with structured findings matching .security-config/schemas/findings.json
 
             ## Important
             - Be precise. Flag real issues, not theoretical ones.
-            - Every finding needs file, line, confidence score, and fix recommendation.
+            - Every security finding needs file, line, confidence score, and fix recommendation.
+            - Code quality and impact findings use INFO or LOW severity only. Do not inflate.
             - If the PR is clean, say so clearly. Do not invent issues.
           claude_args: >-
             --model ${{ inputs.model }}
@@ -136,22 +280,44 @@ jobs:
             }
 
             const result = resultMsg.result;
-
-            // Post review as PR comment
             const body = `## 🔒 Security Review\n\n${result}\n\n---\n*Automated security review by Claude on Vertex AI*`;
 
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: body
-            });
+            // Determine review event based on findings
+            const hasCritical = result.toUpperCase().includes('🚨') || /\bCRITICAL\b/.test(result);
+            const hasRequestChanges = result.includes('REQUEST_CHANGES');
 
-            console.log('Review comment posted.');
+            let reviewEvent = 'COMMENT';
+            if (hasCritical || hasRequestChanges) {
+              reviewEvent = 'REQUEST_CHANGES';
+            } else if (result.includes('**APPROVE**') || result.includes('APPROVE_WITH_CAVEATS') || result.includes('"APPROVE"')) {
+              reviewEvent = 'APPROVE';
+            }
+
+            // Try to post as PR review (supports APPROVE / REQUEST_CHANGES)
+            try {
+              await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                body: body,
+                event: reviewEvent,
+              });
+              console.log(`Posted ${reviewEvent} review.`);
+            } catch (err) {
+              // Fallback to comment if review fails (e.g., permission issues)
+              console.log(`Review failed (${err.message}), falling back to comment.`);
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body,
+              });
+              console.log('Posted review as comment (fallback).');
+            }
 
             // Check for CRITICAL findings
-            if (result.toUpperCase().includes('CRITICAL')) {
-              core.setFailed('Security review found CRITICAL findings. See PR comment for details.');
+            if (hasCritical) {
+              core.setFailed('Security review found CRITICAL findings. See PR review for details.');
             } else {
               console.log('No CRITICAL findings detected.');
             }
