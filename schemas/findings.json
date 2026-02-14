@@ -4,7 +4,7 @@
   "title": "Security Review Findings",
   "description": "Structured output schema for automated security reviews performed by Claude on pull requests.",
   "type": "object",
-  "required": ["has_critical", "summary", "findings"],
+  "required": ["has_critical", "summary", "recommendation", "findings"],
   "additionalProperties": false,
   "properties": {
     "has_critical": {
@@ -15,9 +15,48 @@
       "type": "string",
       "description": "Human-readable summary of the review. Should mention total finding count and highest severity."
     },
+    "recommendation": {
+      "type": "string",
+      "enum": ["APPROVE", "APPROVE_WITH_CAVEATS", "REQUEST_CHANGES"],
+      "description": "Final recommendation for the PR. APPROVE: no issues found. APPROVE_WITH_CAVEATS: minor issues that do not block merge. REQUEST_CHANGES: issues that must be fixed before merge."
+    },
+    "automated_checks": {
+      "type": "object",
+      "description": "Results of automated checks run before the review. Omit if no checks were configured.",
+      "additionalProperties": false,
+      "properties": {
+        "lint": {
+          "type": "string",
+          "enum": ["pass", "fail", "skipped"],
+          "description": "Result of the lint check."
+        },
+        "build": {
+          "type": "string",
+          "enum": ["pass", "fail", "skipped"],
+          "description": "Result of the build check."
+        },
+        "typecheck": {
+          "type": "string",
+          "enum": ["pass", "fail", "skipped"],
+          "description": "Result of the TypeScript type check."
+        },
+        "conflicts": {
+          "type": "string",
+          "enum": ["none", "detected", "skipped"],
+          "description": "Whether merge conflicts with the base branch were detected."
+        }
+      }
+    },
+    "impact_areas": {
+      "type": "array",
+      "description": "List of impacted areas identified during impact analysis (e.g., 'shared-utils', 'database-schema', 'api-endpoints', 'config-files', 'type-contracts').",
+      "items": {
+        "type": "string"
+      }
+    },
     "findings": {
       "type": "array",
-      "description": "List of security findings. Empty array if the PR is clean.",
+      "description": "List of security and quality findings. Empty array if the PR is clean.",
       "items": {
         "type": "object",
         "required": ["severity", "category", "title", "file", "recommendation"],
@@ -30,7 +69,7 @@
           },
           "category": {
             "type": "string",
-            "description": "Security category (e.g., 'Injection', 'Broken Access Control', 'Cryptographic Failures', 'Multi-Tenant Isolation', 'LGPD/Data Protection')."
+            "description": "Finding category (e.g., 'Injection', 'Broken Access Control', 'Cryptographic Failures', 'Multi-Tenant Isolation', 'Code Quality', 'Impact Analysis')."
           },
           "title": {
             "type": "string",
@@ -44,6 +83,12 @@
             "type": "integer",
             "minimum": 1,
             "description": "Line number where the vulnerability occurs. Omit only if the finding is file-wide."
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.7,
+            "maximum": 1.0,
+            "description": "Confidence score for this finding (0.7-1.0). Required for security findings, optional for code quality and impact findings."
           },
           "recommendation": {
             "type": "string",
