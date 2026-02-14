@@ -12,3 +12,14 @@ jobs:
   security-review:
     uses: polen-dev/security-reviews/.github/workflows/security-review.yml@v1
     secrets: inherit
+    # Uncomment and customize the options below as needed:
+    # with:
+    #   model: claude-sonnet-4-5        # default; use opus for critical repos
+    #   max_turns: 10                             # increase for large PRs
+    #   run_lint: "yarn lint"                     # optional: lint before review
+    #   run_build: "yarn build"                   # optional: build before review
+    #   run_typecheck: "yarn tsc --noEmit"        # optional: typecheck before review
+    #   node_version: "20"                        # Node.js version for checks
+    #   extra_instructions: |                     # repo-specific rules
+    #     This repo handles payment processing.
+    #     Flag any logging of credit card numbers.
